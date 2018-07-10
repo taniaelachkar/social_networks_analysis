@@ -1,0 +1,221 @@
+---
+title: "Social Network Analysis - Exercise 1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/taniaelachkar/Desktop/Social Networks Analysis/Assignment 1")
+
+# Importing libraries
+library(igraph)
+library(data.table)
+library(ggplot2)
+library(scales)
+library(RColorBrewer)
+require(splitstackshape)
+```
+
+On this first exercise, we will learn the basic functions of the Igraph package, a great tool to use Social Network Analysis metrics in our projects. We will use in this first exercise a dataset, "mathoverflow-ints.txt", containing interactions between MathOverflow users with the next information:
+
+- Answers to questions
+- Comments to questions
+- Comments to answers
+
+You have to complete the code chunks in this document but also analyze the results, extract insights and describe them in an understandable way.
+
+<span style="color:blue">Please, write all your conclusions in blue</span>
+
+Both exercises may be done individually or in pairs; do not forget to write the name of the members of the team at the beginning of this document and also your team number in the name of this file (exercise1_PXX.Rmd)
+
+## Loading data
+
+In this section, the goal is loading the dataset given for this exercise, building the graph object and analyzing basics metrics.
+
+- Build the graph object with all the interactions. Include the timestamp and the type of the edge as edge attributes.
+- Describe the values provided by summary function on the graph object.
+- Validate the graph has been created correctly comparing with the information after reading the file.
+- Simplify the graph in order to remove loops and multiple edges. After simplifying the graph, a weight attribute should have been created, counting the number of interactions between two users.
+
+```{r}
+# Loading the dataset
+data <- read.table("/Users/taniaelachkar/Desktop/Social Networks Analysis/Assignment 1/mathoverflow-ints.txt")
+head(data)
+class(data)  # it's a data frame
+colnames(data) <- c('v1','v2','timestamp','type')
+
+# Building the graph object
+g <- graph.data.frame(data, directed=TRUE)
+g
+
+# Describing the values provided by summary function on the graph object 
+summary(g)
+
+
+# Validating the graph has been created correctly
+nrow(data)
+ecount(g)  # the number of edges in the graph (506550) is equal to the number of observations in the dataset
+
+v1v2 <- c(data$v1, data$v2)
+length(unique(v1v2))  # 24818
+vcount(g)  # the number of nodes in the graph (24818) is equal to the number of unique values between v1 and v2, implying that the information is the same and that the graph has been created correctly
+
+
+# Simplifying the graph in order to remove loops and multiple edges
+E(g)$weight <- 1
+gs <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE, edge.attr.comb=list(weight="sum"))
+is.simple(gs)  # checking whether the graph is actually simple -> returns TRUE
+is.weighted(gs)  # checking whether the weight attribute exists -> returns TRUE
+
+vcount(gs)  # there are 24818 vertices
+ecount(gs)  # there are 227991 edges
+
+summary(gs)
+```
+
+## Analyzing the graph
+
+In this section, we will use Igraph functions to analyze some basic features:
+
+- Is the graph connected? If it is not, compute the connected components and analyze the statistical distribution of the size of the resulting components. Do this considering all the links but also using only the different types of edges. 
+- Analyze the statistical distribution of the "weight" attribute created in the previous section and fit it to a power law distribution. Does it fit well enough? 
+
+```{r}
+# For the rest of the assignment, we're using the simplified graph created above
+
+# Checking whether the graph is connected
+is_connected(gs)  # this returns FALSE, meaning that the graph is not connected
+
+# Computing the connected components 
+css <- clusters(gs)
+# I couldn't find another way to do this one
+
+# Analysing the statistical distribution of the size of the resulting components
+css$csize
+plot(css$csize, by=gs$type)  # this plot shows that the distribution of the size of the components is not normally distributed. In fact, one cluster has a size of 24668 nodes, while the other clusters have a size ranging from 1 to 3 nodes and don't appear distinctly from zero on the plot because they're very close to zero, especially compared to the value of 24668 that significantly increases the scale of the graph
+
+
+# Analysing the statistical distribution of the "weight" attribute
+plot(graph.strength(gs))  
+
+# Fitting it to a power law distribution
+att <- edge_attr(gs)
+fit <- fit_power_law(att$weight)
+fit$KS.p  # the p-value is 0.018, which is less than 0.05, meaning that we reject the test hypothesis that the original data could have been drawn from the fitted power-law distribution. Therefore no, it doesn't fit well enough because it didn't come from a power-law distribution, which we can confirm by looking at the graph of the weight attribute 
+```
+
+
+## Node degree
+
+A typical analysis when dealing with social networks is studying the degree distribution of the nodes.
+- Visualize the statisical distribution of the node degree.
+- Again, is it a power-law distribution? Explain why this is the case.
+
+```{r}
+# Computing the total-degree node
+ndeg <- degree(gs, mode = "total")  # here we compute the total-degree node of the full graph (not the simplified one) because it includes the values of in-degree and out-degree nodes. 
+
+# Visualising the statistical distribution of the node degree
+plot(ndeg)  # looking at the graph, it looks like it's not a power-law distribution
+
+
+# Determining whether it's a power-law distribution
+fitn <- fit_power_law(ndeg)
+fitn$KS.p  # the p-value is 0.03, which is less than 0.05, meaning that we don't accept the test hypothesis that the original data could have been drawn from the fitted power-law distribution. Therefore no, it doesn't fit well enough because it came from a power-law distribution, which we can confirm by looking at the above graph
+```
+
+## Building connected graphs
+
+In general, in interaction networks, many connected components turn out after creating the graph. However, most of the nodes typically belong to the same giant component. In this section, the goal is:
+- Build a subgraph with all the nodes belonging to the largest connected component.
+- Validate the graph has been correctly created.
+- Analyze how node degree has changed from the original graph to this new subgraph. Find out which nodes have now a smaller number of connections and explain why.
+
+
+```{r}
+# Building a subgraph with all the nodes belonging to the largest connected component 
+vids <- which(css$membership == 1)
+g2 <- induced_subgraph(gs, vids)
+
+
+# Validating the graph has been correctly created
+table(css$membership)
+vcount(gs)
+vcount(g2)  # the number of vertices/nodes in this subgraph is the same as the greatest number of nodes in one component of the main graph
+summary(gs)
+summary(g2)
+ecount(gs)
+ecount(g2)
+# we can conclude from the number of nodes and edges that the subgraph has been correctly created 
+
+
+# Analysing how node degree has changed from the original graph to this new subgraph
+ndeg2 <- degree(g2, mode = "total")  # node degree of the new subgraph
+
+plot(degree.distribution(g))
+plot(degree.distribution(g2))  # the degree distributions of the original graph and the subgraph are identical 
+mean(ndeg)  # 18.37
+mean(ndeg2)  # 18.48, so there is a slight difference whereby the mean degree of the subgraph is slighty greater than that of the original graph 
+
+# Finding out which nodes now have a smaller number of connections and explaining why 
+d_lcc <- degree(g2)
+d_g_s <- degree(gs)
+
+g_2 <- as.data.frame(d_g_s[which(css$membership == which.max(css$csize))])
+
+#Filter for items in giant component
+g_2$d_lcc <- d_lcc
+names(g_2) <- c('g_s','d_lcc')
+identical(g_2$g_s,g_2$d_lcc)
+
+#Identical so no smaller nodes 
+```
+
+# Visualizing shortest paths
+
+On this previous subgraph, you have to compute:
+
+- The shortest path from the node with the highest degree to the rest of the graph.
+- From all these paths, select one path with the maximum length.
+- Visualize only this path using the plot function.
+- Visualize this path within the giant component subgraph.
+
+To this end, use the layout.fruchterman.reingold function to place the nodes in the visualization.
+
+```{r}
+# Getting the index of the node with the highest degree
+maxdeg <- which.max(degree(g2))  # node number 290 
+maxdeg
+
+# Getting the list of shortest paths in the subgraph that have node 290 as origin
+gsp <- get.shortest.paths(g2, maxdeg)
+
+
+# Selecting from all these paths the one with the maximum length
+maxl <- gsp[[1]][[which.max(sapply(gsp[[1]], length))]]
+maxl
+
+
+# Visualise only this path using the plot function
+plot_maxl <- induced_subgraph(g2, maxl)
+plot(plot_maxl)
+
+
+# Visualise this path within the giant component subgraph
+#Option 1
+kc <- coreness(plot_maxl, mode="all")
+plot(plot_maxl, vertex.size=kc*6, vertex.label=kc)
+
+
+#Option 2
+ecol <- rep("gray80", ecount(g2))
+ecol[unlist(maxl)] <- "orange"
+# Generate edge width variable to plot the path:
+ew <- rep(2, ecount(g2))
+ew[unlist(maxl)] <- 4
+# Generate node color variable to plot the path:
+vcol <- rep("gray40", vcount(g2))
+vcol[unlist(maxl)] <- "gold"
+
+plot(g2, vertex.color=vcol, edge.color=ecol, edge.width=ew, edge.arrow.mode=0, vertex.label = NA )
+```
