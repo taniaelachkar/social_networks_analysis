@@ -1,0 +1,227 @@
+---
+title: "Social Network Analysis - Exercise 2"
+author: Pair05 - Tania El Achkar - Michelle Greaves 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Loading the necessary libraries
+library(igraph)
+library(anytime)
+library(ggplot2)
+```
+
+## Loading data and basic description
+
+In this second assignment, we will use a new dataset, Twitter activity around a rumor. In particular, in your dataset, you will find RTs between users, in this format:
+
+- First column:  retweeting user
+- Second column: retweeted user
+- Third column: timestamp
+
+As we did in our first assignment you have to:
+
+- Load the dataset
+- Build the original graph object. Your resulting graph must be directed (and be careful with the direction during the rest of the assignment)
+- We are NOT going to simplify this graph 
+- We are NOT going to keep only the largest connected component
+
+After loading your data you have to describe your graph in a paragraph, mentioning how many nodes and edges it has, how many connected components and how they are (both weak and strong), and how the degree distribution is (is it power law?) for both, in and out degree. Additionally, compute the global clustering and reciprocity for this graph. Interpret your results.
+
+```{r}
+# Loading the dataset
+dt <- read.table("/Users/taniaelachkar/Desktop/Social Networks Analysis/Assignment 2/higgs-activity_time_RTS.txt", header=T, quote="\"", comment.char="")
+
+# Renaming the columns 
+colnames(dt) <- c("retweeting_user","retweeted_user","timestamp")
+
+dt$timestamp <- anytime(dt$timestamp)
+
+head(dt)
+str(dt)
+
+# Building the original directed graph object
+g <- graph_from_data_frame(dt, directed=T, vertices=NULL)
+#Note that the direction of the graph is from the retweeting user to the retweeted user 
+
+# Additional information about the graph 
+vcount(g)  # number of nodes: 256,491
+ecount(g)  # number of edges: 354,930
+
+ccs_w <- clusters(g, mode="weak")
+ccs_s <- clusters(g, mode="strong")
+count_components(g, mode="weak")  # number of connected components with a weak connection: 13,199
+count_components(g, mode="strong")  # number of connected components with a strong connection: 255,002
+
+# Power law for all degrees
+v_all <- degree(g,mode="all")
+pl_model_all <- power.law.fit(v_all)
+pl_model_all$KS.p  # p-value = 1.747854e-05 which is significantly less than 0.05
+
+alpha_all <- pl_model_all$alpha
+xm_all <- pl_model_all$xmin
+
+xx_all <- sort(unique(v_all))
+yy_all <- ((alpha_all-1)/xm_all) * ((xx_all/xm_all)^(-alpha_all))
+
+plot(density(v_all),log="xy",xlim=c(5,1000),ylim=c(1e-5,0.5),type="o")
+lines(xx_all, yy_all, col="red")  # the graph confirms no power-law distribution
+
+# Power law for in degree
+v_in <- degree(g,mode="in")
+pl_model_in <- power.law.fit(v_in)
+pl_model_in$KS.p  # p-value = 0.4653967 which is greater than 0.05
+
+alpha_in <- pl_model_in$alpha
+xm_in <- pl_model_in$xmin
+
+xx_in <- sort(unique(v_in))
+yy_in <- ((alpha_in-1)/xm_in) * ((xx_in/xm_in)^(-alpha_in))
+
+plot(density(v_in),log="xy",xlim=c(5,1000),ylim=c(1e-5,0.5),type="o")
+lines(xx_in, yy_in, col="red")  # the graph confirms the possibility of a power-law distribution
+
+# Power law for out degree
+v_out <- degree(g,mode="out")
+pl_model_out <- power.law.fit(v_out)
+pl_model_out$KS.p  # p-value = 0.04027281 which is almost equal to 0.05
+
+alpha_out <- pl_model_out$alpha
+xm_out <- pl_model_out$xmin
+
+xx_out <- sort(unique(v_out))
+yy_out <- ((alpha_out-1)/xm_out) * ((xx_out/xm_out)^(-alpha_out))
+
+plot(density(v_out),log="xy",xlim=c(5,1000),ylim=c(1e-5,0.5),type="o")
+lines(xx_out, yy_out, col="red")  # the graph confirms the possibility of a power-law distribution
+
+# Computing global clustering
+transitivity(g, type="global")  # 0.0003255645 
+
+# Computing reciprocity 
+reciprocity(g, ignore.loops = T)  # 0.004778407 
+
+# Analysing the graph and interpreting the results
+# This graph has a total of 256,491 nodes and 354,930 edges. 
+# It has 13,199 connected components that have a weak connection and 255,002 connected components that have a strong connection, so it has about 20 times more strong connections than weak connections. 
+# In terms of degree distribution, we notice that the combined (all) degree distribution has a p-value = 1.747854e-05 which is less than 0.05, meaning that we reject the null hypothesis and that the data was not drawn from the fitted power-law distribution. This is supported by the graph (density plot). However, when looking at the degree distributions of in degrees and out degrees separately, we notice that their p-values are greater than 0.05 (significantly greater than 0.05 at 0.4653967 for the in degree and almost equal to 0.05 at 0.04027281 for the out degree). These results are also confirmed by looking at the density plots of in and out degrees separately.
+# The global clustering value of this graph, which is also known as transitivity, is equal to 0.0003255645, meaning that nodes in this graph have a 0.03% probability of clustering together, which is very low. A transitivity of 1 means that all the components in the network are cliques, whereas a transitivity of zero, which is close to the transitivity of our graph, means that there aren't any closed paths of length 2. 
+# Reciprocity measures the proportion of mutual connections in a directed graph. This is equivalent to the probability that the opposite counterpart of a directed edge is also included in the graph. For our graph, that value is equal to 0.004778407, meaning that about 0.4% of the connections in this graph are mutual connections. 
+```
+
+## Analyzing communities in a spreading network
+
+In this section, you have to compute communities using two algorithms:
+
+  - walktrap.community
+  - fastgreedy.community
+
+Simplify and consider your graph as undirected if it is needed to figure out communities.
+
+You have to make two visualizations of the network with the results provided by the algorithms. In order to compare both results, keep the same positions for the nodes in both visualizations. Use the _crossing_ function to force the visualization layout to place nodes in the same community together.
+
+```{r}
+# walktrap.community
+gu <- graph.data.frame(dt, directed=F)
+gs<-simplify(gu,remove.multiple=T,remove.loops=T,edge.attr.comb=list(weight="sum"))
+
+subg <- subgraph(gs, degree(gs)>70)
+subg_wt <- walktrap.community(subg)
+V(subg)$color <- subg_wt$membership + 1
+plot_wt <- plot(subg, vertex.label.dist=NA, vertex.size=6)
+
+modularity(subg_wt)  # 0.4946513
+#membership(subg_wt)
+crossing_wt <- plot(subg_wt, subg, vertex.label.dist=NA, vertex.size=3)
+
+cross_wt <- crossing(subg_wt, subg)
+
+
+# fastgreedy.community
+subg1 <- subgraph(gs, degree(gs)>70)
+subg_fg <- fastgreedy.community(subg1)
+V(subg1)$color <- subg_fg$membership + 1
+plot_fg <- plot(subg1, vertex.label.dist=NA, vertex.size=6)
+
+modularity(subg_fg)  # 0.5162864
+#membership(subg_fg)
+crossing_fg <- plot(subg_fg, subg, vertex.label.dist=NA, vertex.size=3)
+
+cross_fg <- crossing(subg_fg, subg)
+```
+
+
+Compare also two metrics to check which algorithm provides the best result and discuss your choice:
+
+  - Internal and external density (for this goal, again, check the function _crossing_ in Igraph)
+  - Modularity
+  
+```{r}
+# Calculating the internal density for each community
+iden <- function(com) {
+  int_den <- numeric()
+  for(member in unique(com$membership)) {
+    members <- com$names[com$membership == member]
+    com_edges <- ecount(induced.subgraph(gs, members))
+    num_memb <- length(members)
+    internal_den <- (com_edges * 2) / (num_memb * (num_memb - 1))
+    int_den <- c(int_den, internal_den)
+  }
+  return(int_den)
+}
+
+iden_wt <- iden(subg_wt)
+iden_wt  # internal density for walktrap.community
+iden_fg <- iden(subg_fg)
+iden_fg  # internal density for fastgreedy.community
+
+
+# Calculating the external density for each community
+eden <- function(comm, g, cross) {
+  ext_den <- data.frame(community = numeric(), density = numeric())
+  
+  for(m in 1:length(comm)) {
+    members <- comm$names[comm$membership == m]
+    ext_edges <- length(E(g)[cross][from(members)])
+    
+    c_nodes <- vcount(induced_subgraph(g, members))
+    all_edges <- (c_nodes * (vcount(g) - c_nodes))
+
+    ext_den <- rbind(ext_den, data.frame(community = m, density = ext_edges/all_edges))
+  }
+  return(ext_den)
+}
+
+eden_wt <- eden(subg_wt, subg, crossing(subg_wt, subg))  # external density for walktrap.community
+eden_fg <- eden(subg_fg, subg1, crossing(subg_fg, subg1))  # external density for fastgreedy.community
+
+# Order the external density ascendingly
+eden_fg[order(eden_fg$density, decreasing = T),]
+eden_wt[order(eden_wt$density, decreasing = T),]
+```
+
+
+## Analyzing how the spreading works
+
+In this section, we have to describe how the spreading has evolved:
+
+- Plot a graph showing the number of infected nodes on time (an infected node is a node who has published content - it is in the graph but we see no retweets from him but people retweet his content - or a node who has retweeted a tweet). Describe what you see.
+
+```{r}
+dt1 <- unique(append(dt$retweeting_user, dt$retweeted_user)) 
+length(dt1)
+sum(duplicated(dt$retweeting_user))
+# This shows that all of the users who are retweeting have been retweeted at one point in the timeframe of the dataset
+
+# Creating a new dataframe that is idential to the original dataset, except that the timestamp column is sorted by ascending order 
+dt2 <- dt[with(dt, order(timestamp)), ]  # ascending order means we start with users that are not infected
+
+# Removing all the duplicated rows and storing the result in a new dataframe
+dt2_unique <- dt2[!duplicated(dt2$retweeting_user),]
+
+# Adding a new column that is an ID that we generate
+dt2_unique['id'] <- 1:length(dt2_unique$retweeting_user)
+
+# Plot showing the number of infected nodes on time 
+ggplot(dt2_unique, aes(x=timestamp, y=id)) + geom_line() + geom_point(colour="red", size=1)
+```
